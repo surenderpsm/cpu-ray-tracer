@@ -2,8 +2,30 @@
 
 A multithreaded CPU-based ray tracing engine built from scratch in modern C++, with a real-time OpenGL preview window and interactive ImGui GUI. Supports recursive ray bouncing, multiple materials (diffuse, metal), and configurable scene controls.
 
-![screenshot](screenshots/demo.png)
+## Overview of the UI
 
+<p align="center">
+  <img src="ui.png" alt="UI Screenshot" width="1500"/><br/>
+  <em>UI Panel with ImGui controls</em>
+</p>
+
+<p align="center">
+  <img src="image.png" alt="Scene Preview" width="1500"/><br/>
+  <em>UI Panel - showing outputs</em>
+</p>
+
+<p align="center">
+  <img src="output.png" alt="Render Output" width="1500"/><br/>
+  <em>Medium quality render (time: 5s)</em>
+</p>
+
+<p align="center">
+  <img src="output_highrender.png" alt="High Quality Render" width="1500"/><br/>
+  <em>High-quality render (time: 3m 42s)</em>
+</p>
+
+
+[Here is a brief demo video (opens Google Drive)](https://drive.google.com/file/d/15kkNp-e7-jI2pOCzlNfwFs1qppRu-0B9/view?usp=sharing)
 ---
 
 ## Features
