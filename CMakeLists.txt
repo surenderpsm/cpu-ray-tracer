@@ -40,6 +40,8 @@ target_include_directories(raytracer PRIVATE
     vendor/glad/include
     vendor/glfw/include
     vendor/imgui
+    vendor/json
+    vendor/stb/include
 )
 
 # Link everything

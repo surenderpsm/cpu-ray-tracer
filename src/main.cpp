@@ -8,6 +8,11 @@
 #include "UI.h"
 #include "Lambertian.h"
 #include "Metal.h"
+#define STB_IMAGE_RESIZE_IMPLEMENTATION
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
+#include "stb_image_resize.h"
+
 // ImGui
 #include "imgui.h"
 #include "backends/imgui_impl_glfw.h"
@@ -15,9 +20,12 @@
 
 #include <iostream>
 #include <memory>
+#include <vector>
 
-const int WIDTH = 800;
-const int HEIGHT = 450;
+const int BASE_WIDTH = 200;
+const int BASE_HEIGHT = 112;
+const int DISPLAY_WIDTH = 1000;
+const int DISPLAY_HEIGHT = 562;
 
 GLuint createTexture(int width, int height, uint8_t *data)
 {
@@ -42,7 +50,7 @@ int main()
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-    GLFWwindow *window = glfwCreateWindow(WIDTH, HEIGHT, "CPU Ray Tracer", nullptr, nullptr);
+    GLFWwindow *window = glfwCreateWindow(DISPLAY_WIDTH, DISPLAY_HEIGHT, "CPU Ray Tracer", nullptr, nullptr);
     glfwMakeContextCurrent(window);
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
     {
@@ -59,51 +67,99 @@ int main()
     ImGui_ImplOpenGL3_Init("#version 330");
     ImGui::StyleColorsDark();
 
-    // Init Scene
-    Scene scene;
-    auto red = new Lambertian(Vec3(0.8f, 0.3f, 0.3f));
-    auto ground = new Lambertian(Vec3(0.8f, 0.8f, 0.0f));
-    auto metal = new Metal(Vec3(0.8f, 0.8f, 0.8f), 0.1f);
-
-    scene.add(std::make_shared<Sphere>(Vec3(0, 0, -1), 0.5, red));
-    scene.add(std::make_shared<Sphere>(Vec3(0, -100.5, -1), 100, ground));
-    scene.add(std::make_shared<Sphere>(Vec3(1, 0, -1), 0.5, metal));
-
-    Camera camera(16.0f / 9.0f, 90.0f);
-    Renderer renderer(WIDTH, HEIGHT);
-    renderer.render(scene, camera);
-
-    GLuint texture = createTexture(renderer.getWidth(), renderer.getHeight(), renderer.getImageData());
-
-    // UI Setup
+    // Init UI state and scene
     UIState uiState;
-    UI ui(uiState, camera, scene);
+    uiState.objects.push_back({Vec3(0, 0, -1), 0.5f, "lambertian", Vec3(0.8f, 0.3f, 0.3f), 0.0f});
+    uiState.objects.push_back({Vec3(0, -100.5f, -1), 100.0f, "lambertian", Vec3(0.8f, 0.8f, 0.0f), 0.0f});
+    uiState.objects.push_back({Vec3(1, 0, -1), 0.5f, "metal", Vec3(0.8f, 0.8f, 0.8f), 0.1f});
+    uiState.sceneDirty = true;
+    UI ui(uiState);
+
+    Scene scene;
+    Camera camera(16.0f / 9.0f, uiState.fov);
+
+    Renderer renderer(BASE_WIDTH, BASE_HEIGHT);
+
+    std::vector<uint8_t> finalBuffer(DISPLAY_WIDTH * DISPLAY_HEIGHT * 3);
+    GLuint texture = createTexture(DISPLAY_WIDTH, DISPLAY_HEIGHT, finalBuffer.data());
 
     // Main Loop
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();
-
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        // UI rendering
+        // UI
         ui.render();
-
-        // Re-render scene if UI triggered it
+        if (uiState.requestRender && uiState.previewMode)
+        {
+            uiState.requestRender = false;
+            uiState.isRendering = true;
+        }
         if (uiState.requestRender)
         {
-            Vec3 lightDir(uiState.lightDir[0], uiState.lightDir[1], uiState.lightDir[2]);
-            renderer.render(scene, camera, lightDir);
-
-            updateTexture(texture, renderer.getWidth(), renderer.getHeight(), renderer.getImageData());
             uiState.requestRender = false;
+            uiState.renderQueued = true;
+        }
+        else if (uiState.renderQueued)
+        {
+            uiState.renderQueued = false;
+            uiState.isRendering = true;
+        }
+        else if (uiState.isRendering)
+        {
+            // Rebuild scene if dirty
+            if (uiState.sceneDirty)
+            {
+                scene.clear();
+                for (const auto &obj : uiState.objects)
+                {
+                    Material *mat;
+                    if (obj.materialType == "metal")
+                        mat = new Metal(obj.color, obj.fuzz);
+                    else
+                        mat = new Lambertian(obj.color);
+                    scene.add(std::make_shared<Sphere>(obj.position, obj.radius, mat));
+                }
+                camera = Camera(16.0f / 9.0f, uiState.fov);
+                uiState.sceneDirty = false;
+            }
+
+            // Render at scaled res
+            int scale = uiState.previewMode ? 1 : uiState.resScale;
+            int renderW = BASE_WIDTH * scale;
+            int renderH = BASE_HEIGHT * scale;
+
+            renderer.resize(renderW, renderH);
+            Vec3 lightDir(uiState.lightDir[0], uiState.lightDir[1], uiState.lightDir[2]);
+            if (uiState.previewMode)
+            {
+                uiState.samplesPerPixel = 8;
+                uiState.maxDepth = 2;
+            }
+            renderer.render(scene, camera, lightDir, uiState.samplesPerPixel, uiState.maxDepth);
+
+            stbir_resize_uint8(renderer.getImageData(), renderW, renderH, 0,
+                               finalBuffer.data(), DISPLAY_WIDTH, DISPLAY_HEIGHT, 0, 3);
+
+            updateTexture(texture, DISPLAY_WIDTH, DISPLAY_HEIGHT, finalBuffer.data());
+            uiState.isRendering = false;
+            if (!uiState.previewMode && uiState.exportRequested)
+            {
+                stbi_write_png("output.png", DISPLAY_WIDTH, DISPLAY_HEIGHT, 3, finalBuffer.data(), DISPLAY_WIDTH * 3);
+                std::cout << "Exported to output.png" << std::endl;
+            }
         }
 
-        // Draw image to ImGui
+        // Draw Image
         ImGui::Begin("Render Output");
-        ImGui::Image((void *)(intptr_t)texture, ImVec2(WIDTH, HEIGHT));
+        ImGui::Image((void *)(intptr_t)texture, ImVec2(DISPLAY_WIDTH, DISPLAY_HEIGHT));
+        if (uiState.isRendering)
+        {
+            ImGui::TextColored(ImVec4(1, 1, 0, 1), "Rendering full image...");
+        }
         ImGui::End();
 
         // Final draw
@@ -113,7 +169,6 @@ int main()
         glViewport(0, 0, display_w, display_h);
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-
         glfwSwapBuffers(window);
     }
 

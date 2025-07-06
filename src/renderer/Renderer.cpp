@@ -1,9 +1,7 @@
 #include "Renderer.h"
 #include <algorithm>
 #include "Material.h"
-
-int samplesPerPixel = 1;
-const int maxDepth = 5;
+#include <thread>
 
 inline float randFloat()
 {
@@ -36,28 +34,45 @@ Vec3 rayColor(const Ray &r, const Scene &scene, const Vec3 &lightDir, int depth)
     return (1.0f - t) * Vec3(1.0f, 1.0f, 1.0f) + t * Vec3(0.5f, 0.7f, 1.0f);
 }
 
-void Renderer::render(const Scene &scene, const Camera &camera, const Vec3 &lightDir)
+void Renderer::render(const Scene &scene, const Camera &camera, const Vec3 &lightDir, const int samplesPerPixel, const int maxDepth)
 {
-    for (int y = 0; y < height; ++y)
-    {
-        for (int x = 0; x < width; ++x)
-        {
-            Vec3 color(0, 0, 0);
-            for (int s = 0; s < samplesPerPixel; ++s)
-            {
-                float u = (x + randFloat()) / (width - 1);
-                float v = (height - 1 - y + randFloat()) / (height - 1);
-                Ray r = camera.getRay(u, v);
-                color += rayColor(r, scene, lightDir, maxDepth);
-            }
-            color /= float(samplesPerPixel);
+    int numThreads = std::thread::hardware_concurrency();
+    int rowsPerThread = height / numThreads;
 
-            int index = (y * width + x) * 3;
-            image[index + 0] = static_cast<uint8_t>(255.999f * std::clamp(color.x, 0.0f, 1.0f));
-            image[index + 1] = static_cast<uint8_t>(255.999f * std::clamp(color.y, 0.0f, 1.0f));
-            image[index + 2] = static_cast<uint8_t>(255.999f * std::clamp(color.z, 0.0f, 1.0f));
+    auto renderBlock = [&](int startY, int endY)
+    {
+        for (int y = startY; y < endY; ++y)
+        {
+            for (int x = 0; x < width; ++x)
+            {
+                Vec3 color(0, 0, 0);
+                for (int s = 0; s < samplesPerPixel; ++s)
+                {
+                    float u = (x + randFloat()) / (width - 1);
+                    float v = (height - 1 - y + randFloat()) / (height - 1);
+                    Ray r = camera.getRay(u, v);
+                    color += rayColor(r, scene, lightDir, maxDepth);
+                }
+                color /= float(samplesPerPixel);
+
+                int index = (y * width + x) * 3;
+                image[index + 0] = static_cast<uint8_t>(255.999f * std::clamp(color.x, 0.0f, 1.0f));
+                image[index + 1] = static_cast<uint8_t>(255.999f * std::clamp(color.y, 0.0f, 1.0f));
+                image[index + 2] = static_cast<uint8_t>(255.999f * std::clamp(color.z, 0.0f, 1.0f));
+            }
         }
+    };
+
+    std::vector<std::thread> threads;
+    for (int t = 0; t < numThreads; ++t)
+    {
+        int startY = t * rowsPerThread;
+        int endY = (t == numThreads - 1) ? height : startY + rowsPerThread;
+        threads.emplace_back(renderBlock, startY, endY);
     }
+
+    for (auto &t : threads)
+        t.join();
 }
 
 uint8_t *Renderer::getImageData()

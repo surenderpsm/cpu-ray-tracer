@@ -34,4 +34,8 @@ public:
 
         return hitAnything;
     }
+    void clear()
+    {
+        objects.clear();
+    }
 };
